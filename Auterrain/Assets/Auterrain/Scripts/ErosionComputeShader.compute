@@ -1,0 +1,120 @@
+﻿#pragma kernel CSMain
+
+RWStructuredBuffer<float> map;
+StructuredBuffer<int> brushIndice;
+StructuredBuffer<int> randomIndice;
+StructuredBuffer<float> brushWeight;
+
+int mapSize;
+int brushLength;
+int borderSize;
+
+int maxLifetime;
+float inertia;
+float sedimentCapacityFactor;
+float minSedimentCapacity;
+float depositSpeed;
+float erodeSpeed;
+
+float startSpeed;
+float startWater;
+float evapSpeed;
+float gravity;
+
+float3 CalGradNHeight (float posX, float posY) {
+    
+    int coordY = (int) posY;
+    int coordX = (int) posX;
+    
+    float y = posY - coordY;
+    float x = posX - coordX;
+    
+    int nodeIndex = coordX + coordY * mapSize;
+    
+    float height_N_E = map[nodeIndex + 1];
+    float height_N_W = map[nodeIndex];
+    float height_S_E = map[nodeIndex + mapSize + 1];
+    float height_S_W = map[nodeIndex + mapSize];
+    
+    float gradY = (height_S_W - height_N_W) * (1 - x) + (height_S_E - height_N_E) * x;
+    float gradX = (height_N_E - height_N_W) * (1 - y) + (height_S_E - height_S_W) * y;
+    
+    float height = height_S_E * x * y + height_S_W * (1 - x) * y + height_N_E * x * (1 - y) + height_N_W * (1 - x) * (1 - y);
+    
+    return float3(gradX,gradY,height);
+}
+
+[numthreads(1024,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    int index = randomIndice[id.x];
+    
+    float posY = float(index)/mapSize;
+    float posX = float(index)%mapSize;
+    
+    float dirY = 0;
+    float dirX = 0;
+    
+    float water = startWater;
+    float speed = startSpeed;
+    
+    float sediment = 0;
+
+    for (int i = 0; i < maxLifetime; i ++) {
+        int nodeY = (int) posY;
+        int nodeX = (int) posX;
+        
+        int dropletIndex = nodeX + nodeY * mapSize;
+        
+        float cellOffsetY = posY - nodeY;
+        float cellOffsetX = posX - nodeX;
+
+        float3 gradNHeight = CalGradNHeight(posX, posY);
+        dirY = (dirY * inertia - gradNHeight.y * (1 - inertia));
+        dirX = (dirX * inertia - gradNHeight.x * (1 - inertia));
+        
+        float len = max(0.01,sqrt(dirX * dirX + dirY * dirY));
+        dirY /= len;
+        dirX /= len;
+        posY += dirY;
+        posX += dirX;
+
+        if ((dirX == 0 && dirY == 0) || 
+            posX < borderSize || 
+            posX > mapSize - borderSize || 
+            posY < borderSize || posY > mapSize - borderSize) {
+            break;
+        }
+
+        float newHeight = CalGradNHeight(posX, posY).z;
+        float deltaHeight = newHeight - gradNHeight.z;
+
+        float sedimentCapacity = max(-deltaHeight * speed * water * sedimentCapacityFactor, minSedimentCapacity);
+        
+        if (sediment > sedimentCapacity || deltaHeight > 0) {
+            float amountToDeposit = (deltaHeight > 0) ? min(deltaHeight, sediment) : (sediment - sedimentCapacity) * depositSpeed;
+            sediment -= amountToDeposit;
+
+            map[dropletIndex] += amountToDeposit * (1 - cellOffsetX) * (1 - cellOffsetY);
+            map[dropletIndex + 1] += amountToDeposit * cellOffsetX * (1 - cellOffsetY);
+            map[dropletIndex + mapSize] += amountToDeposit * (1 - cellOffsetX) * cellOffsetY;
+            map[dropletIndex + mapSize + 1] += amountToDeposit * cellOffsetX * cellOffsetY;
+        }
+        else {
+            float amountToErode = min ((sedimentCapacity - sediment) * erodeSpeed, -deltaHeight);
+            
+            for (int i = 0; i < brushLength; i ++) {
+                int erodeIndex = dropletIndex + brushIndice[i];
+
+                float weightedErodeAmount = amountToErode * brushWeight[i];
+                float deltaSediment = (map[erodeIndex] < weightedErodeAmount) ? map[erodeIndex] : weightedErodeAmount;
+                map[erodeIndex] -= deltaSediment;
+                sediment += deltaSediment;
+            }
+        }
+
+        speed = sqrt (max(0,speed * speed + deltaHeight * gravity));
+        water *= (1 - evapSpeed);
+    }
+    
+}

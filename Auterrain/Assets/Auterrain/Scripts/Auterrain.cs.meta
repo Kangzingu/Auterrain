@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: ee4f8d1e1936658449029e8014c2b2fd
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - terrainImage: {instanceID: 0}
+  - erosionComputeShader: {fileID: 7200000, guid: ed6aedd1bffeccd49b8b22e1b535bb8f,
+      type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
